@@ -397,4 +397,4 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 
 
 
-INDICT_XLSX_Analysis('../input_data/LabChartScoring.xlsx','../input_data/Master.xlsx',save_path = '../results2/')
+# INDICT_XLSX_Analysis('../input_data/LabChartScoring.xlsx','../input_data/Master.xlsx',save_path = '../results2/')
