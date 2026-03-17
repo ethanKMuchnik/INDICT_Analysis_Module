@@ -1,6 +1,6 @@
 # Analysis Module
 
-Tools for analyzing INDICT XLSX scoring data.
+Tools for analyzing INDICT XLSX scoring data for trial
 
 ## Installation
 pip install .
