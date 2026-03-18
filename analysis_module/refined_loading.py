@@ -94,12 +94,17 @@ def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict):
 		num_events_ind = boolean_events.sum()
 		event_counts.append(num_events_ind)
 
-		# Compute tier charachter - note def 
+		# Compute tier charachter - note def and if  
 		tier1_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier1'])
 		tier2_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier2'])
 		tier3_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier3'])
 
 		tier_character_ind = (tier1_hours + 2*tier2_hours + 3*tier3_hours)/bucket_size
+
+		# note change
+		if valid_hours_ind == 0:
+			tier_character_ind = np.nan
+			
 		tier_characters.append(round(tier_character_ind,2))
 
 		# Compute daily SD rate = [SDs/(valid hours)] * 24
