@@ -131,7 +131,7 @@ def series_overlap(series1,series2):
 
 	return total_overlap
 
-def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../results/',bucket_size = 6, max_time = 240):
+def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, max_time = 240):
 
 	"""
 	Inputs: Scoring and master file with presumed format 
@@ -156,11 +156,6 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 	output_dictionary = dict()
 
 
-
-	# Create excel writer for outputs....
-	excel_writer = pd.ExcelWriter(save_path + 'event_tables.xlsx',engine = 'openpyxl')
-
-
 	#Iterate through the patients 
 	for patient_id, relevant_sheet in input_sheets_dict.items():
 		print('Analyzing patient: ', patient_id)
@@ -169,7 +164,8 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 		# Reference master list 
 		patient_injury_datetime = master_sheet.loc[patient_id, 'injury_datetime']
 		patient_treatment_group = master_sheet.loc[patient_id, 'treatment_group']
-		
+		temp_dict['patient_treatment_group'] = patient_treatment_group
+		temp_dict['patient_injury_datetime'] = patient_injury_datetime		
 		# Get event data 
 		event_data = extract_events_from_single_sheet(relevant_sheet,patient_injury_datetime)
 
@@ -179,6 +175,7 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 		temp_dict['randomization_hours'],randomization_datetime = get_randomization_time(relevant_sheet,patient_injury_datetime)
 		temp_dict['Epochs'] = {'Valid':[],'Tier1':[],'Tier2':[],'Tier3':[]}
 		valid_tier_names = ['Tier1','Tier2','Tier3']
+		temp_dict['randomization_datetime'] = randomization_datetime		
 
 
 		# Events DEFAULT to standard tier - unless a treatment group overrides that 
@@ -227,8 +224,7 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 
 
 		# Save the event csv
-		event_save_path = save_path + f'{patient_id}-events.csv'
-		#event_data.to_csv(event_save_path,index = False)
+		temp_dict['event_data_df'] = event_data
 
 		# Establish valid recording epochs 
 		row_counter_validity = 0 
@@ -255,13 +251,12 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 		
 		# Compute both daily and bucketed events 
 		daily_events = compute_bucketed_events(event_data,24,max_time,temp_dict)
-		daily_save_path = save_path + f'{patient_id}-daily_events.csv'
-		#daily_events.to_csv(daily_save_path,index = False)
+		temp_dict['daily_events_df'] = daily_events
 
 
 		bucketed_events = compute_bucketed_events(event_data,bucket_size,max_time,temp_dict)
-		bucketed_save_path = save_path + f'{patient_id}-bucketed_events.csv'
-		#bucketed_events.to_csv(bucketed_save_path,index = False)
+		temp_dict['bucketed_events_df'] = bucketed_events
+
 		
 		# Add stats, rates, tier validity overlaps, etc to json
 		valid_interval_lengths = [end-start for (start,end) in temp_dict['Epochs']['Valid']]
@@ -293,34 +288,50 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 			else:
 				temp_dict['Summary'][tier_name]['daily_SD_rate'] = np.nan
 		# Assign temp dict to this relevant spot for patient
+
 		output_dictionary[patient_id] = temp_dict
 
+	return output_dictionary
+
+	
+
+	# Close excel writer
+	excel_writer.close()
+
+def export_INDICT_data(results_dict,save_path):
 
 
+	# Create excel writer for outputs....
+	excel_writer = pd.ExcelWriter(save_path + 'event_tables.xlsx',engine = 'openpyxl')
+
+
+	for patient_id in results_dict.keys():
+
+		temp_dict = results_dict[patient_id]
 
 		# Save the events to a sheet
-		event_data.to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0, startcol=0)
+		temp_dict['event_data_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0, startcol=0)
 
 		daily_start_col = 5
-		daily_events.to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=daily_start_col)
+		temp_dict['daily_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=daily_start_col)
 
 		bucketed_start_col = 11
-		bucketed_events.to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
+		temp_dict['bucketed_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
 
 		# Add individual stats
 		worksheet = excel_writer.sheets[patient_id]
 
 		worksheet['R1'] = 'Treatment Group'
-		worksheet['S1'] = patient_treatment_group
+		worksheet['S1'] = temp_dict['patient_treatment_group']
 		worksheet['S1'].font = Font(bold=True)
 		worksheet['S1'].fill = PatternFill(start_color='d4675f', end_color='d4675f', fill_type='solid')
 
 
 		worksheet['R2'] = 'Time of Injury'
-		worksheet['S2'] = patient_injury_datetime
+		worksheet['S2'] = temp_dict['patient_injury_datetime']
 
 		worksheet['R4'] = 'Randomization Datetime'
-		worksheet['S4'] = randomization_datetime
+		worksheet['S4'] = temp_dict['randomization_datetime']
 
 		worksheet['R5'] = 'Randomization Hours'
 		worksheet['S5'] = temp_dict['randomization_hours']
@@ -374,27 +385,19 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,save_path = '../re
 
 		adjust_column_widths(excel_writer.sheets[f'{patient_id}'])
 
- # # Add custom cells
- #  worksheet['R1'] = 'Average time'
- #  worksheet['R2'] = temp_dict['randomization_datetime']  # or whatever value
-
-
-
-	
-	# Get json
-	json_str = json.dumps(output_dictionary, sort_keys=True, indent=2)
-
-	# Regex to put lists on one line
-	json_str = re.sub(r'\[(\s+.*?)\]', lambda m: '[' + re.sub(r'\s+', ' ', m.group(1)).strip() +']', json_str, flags=re.DOTALL)
-
-	# Save it
-	with open(save_path + 'output.json', 'w') as f:
-	  f.write(json_str)
-
-
-	# Close excel writer
 	excel_writer.close()
 
+ 
 
+
+	# # Get json
+	# json_str = json.dumps(output_dictionary, sort_keys=True, indent=2)
+
+	# # Regex to put lists on one line
+	# json_str = re.sub(r'\[(\s+.*?)\]', lambda m: '[' + re.sub(r'\s+', ' ', m.group(1)).strip() +']', json_str, flags=re.DOTALL)
+
+	# # Save it
+	# with open(save_path + 'output.json', 'w') as f:
+	#   f.write(json_str)
 
 # INDICT_XLSX_Analysis('../input_data/LabChartScoring.xlsx','../input_data/Master.xlsx',save_path = '../results2/')
