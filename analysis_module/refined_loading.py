@@ -1,10 +1,13 @@
-# Imported Librariers
+# Imported Libraries
 import pandas as pd
 import numpy as np 
 import json 
 import re 
 from openpyxl.styles import Font, PatternFill
+# -------
 
+
+# Simple cosmetics 
 def adjust_column_widths(worksheet):
   """Auto-adjust column widths based on content"""
   for column in worksheet.columns:
@@ -37,12 +40,14 @@ def format_master_file(input_master_file):
 # Get A and D col of event data with set rules 
 def extract_events_from_single_sheet(input_sheet,patient_injury_datetime):
 
+	# Get tupe and datetime
 	event_data = input_sheet.iloc[:, [0, 3]].copy()
 	event_data.columns = ['event_type', 'datetime']
 		
 	# Drop na event rows 
 	event_data = event_data.dropna(subset=['event_type'])
-	
+		
+	# Subtract Time of injury
 	event_data['datetime'] = event_data['datetime'].dt.round('s') #Reads data and rounds
 	event_data['time_post_injury'] = ((event_data['datetime'] -patient_injury_datetime).dt.total_seconds() / 3600).round(2)
 
@@ -75,14 +80,19 @@ def check_time_inclusion_in_list(time_hours,range_list):
 
 	return False
 
-def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict):
-	time_hours = np.arange(0,max_time,bucket_size)
+def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,time_reference_key = 'time_post_injury',min_time = 0,fixed_offset = 0):
+	time_hours = np.arange(min_time,max_time,bucket_size)
 	valid_hours = [] 
 	event_counts = []
 	tier_characters = []
 	daily_SD_rate = []
 
-	for t in time_hours:
+
+
+	for abs_time in time_hours:
+		# shift time 
+
+		t = abs_time + fixed_offset
 		segment_time_series = [(t,t + bucket_size)]
 
 		# Valid hours
@@ -90,7 +100,7 @@ def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict):
 		valid_hours.append(round(valid_hours_ind,2))
 
 		# Compute event count
-		boolean_events = ((event_data['time_post_injury'] >= t) & (event_data['time_post_injury'] < t + bucket_size))
+		boolean_events = ((event_data[time_reference_key] >= t) & (event_data[time_reference_key] < t + bucket_size))
 		num_events_ind = boolean_events.sum()
 		event_counts.append(num_events_ind)
 
@@ -169,22 +179,25 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 		# Reference master list 
 		patient_injury_datetime = master_sheet.loc[patient_id, 'injury_datetime']
 		patient_treatment_group = master_sheet.loc[patient_id, 'treatment_group']
-		temp_dict['patient_treatment_group'] = patient_treatment_group
+		if patient_treatment_group == 'SD-Guided':
+			patient_treatment_group = 'Treatment'
 		temp_dict['patient_injury_datetime'] = patient_injury_datetime		
 		# Get event data 
 		event_data = extract_events_from_single_sheet(relevant_sheet,patient_injury_datetime)
 
 
 		# Randomization time
-		temp_dict['treatment_group'] = patient_treatment_group
+		temp_dict['patient_treatment_group'] = patient_treatment_group
 		temp_dict['randomization_hours'],randomization_datetime = get_randomization_time(relevant_sheet,patient_injury_datetime)
 		temp_dict['Epochs'] = {'Valid':[],'Tier1':[],'Tier2':[],'Tier3':[]}
 		valid_tier_names = ['Tier1','Tier2','Tier3']
 		temp_dict['randomization_datetime'] = randomization_datetime		
 
 
-		# Events DEFAULT to standard tier - unless a treatment group overrides that 
+		# Events DEFAULT to standard tier - unless a treatment group overrides that or prerandom
 		event_data['momentary_treatment_tier'] = 'Standard'
+		event_data.loc[event_data['time_post_injury'] < temp_dict['randomization_hours'], 'momentary_treatment_tier'] ='Pre-Randomization'
+
 
 		# Obtain tier data if in treatment group
 		if patient_treatment_group == 'Treatment':
@@ -225,6 +238,7 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 					event_data.at[index, 'momentary_treatment_tier'] = 'Tier3'
 					inclusion_count += 1
 
+		
 				assert inclusion_count < 2
 
 
@@ -261,11 +275,16 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 
 		bucketed_events = compute_bucketed_events(event_data,bucket_size,max_time,temp_dict)
 		temp_dict['bucketed_events_df'] = bucketed_events
+		
+		# randomization centered time
+		bucketed_events_post_random = compute_bucketed_events(event_data,6,72,temp_dict,min_time = -24,fixed_offset = temp_dict['randomization_hours'])
+		temp_dict['bucketed_events_df_random_centered'] = bucketed_events_post_random
+
 
 		
 		# Add stats, rates, tier validity overlaps, etc to json
-		valid_interval_lengths = [end-start for (start,end) in temp_dict['Epochs']['Valid']]
-		total_valid_length = round(sum(valid_interval_lengths),2)
+		total_valid_length = series_overlap(temp_dict['Epochs']['Valid'],[(temp_dict['randomization_hours'],1000)])
+		total_valid_length = round(total_valid_length,2)
 
 		temp_dict['Summary'] = dict()
 
@@ -274,20 +293,21 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 			valid_tier_time = round(series_overlap(temp_dict['Epochs'][tier_name],temp_dict['Epochs']['Valid']),2)
 			temp_dict['Summary'][tier_name] = {'valid_hours':valid_tier_time}
 		
-		standard_val_time = round(total_valid_length - temp_dict['Summary']['Tier1']['valid_hours'] - temp_dict['Summary']['Tier2']['valid_hours'] - temp_dict['Summary']['Tier3']['valid_hours'],2)
-		temp_dict['Summary']['Standard'] = {'valid_hours':standard_val_time}
 		temp_dict['Summary']['All'] = {'valid_hours':total_valid_length}
 
 		# Get counts
-		for tier_name in ['Tier1','Tier2','Tier3','Standard']:
-			num_events_tier = int((event_data['momentary_treatment_tier'] == tier_name).sum())
+		# For counts modify the event data 
+		event_data_no_prerandom_events = event_data[event_data['momentary_treatment_tier'] != 'Pre-Randomization'].copy()
+
+		for tier_name in ['Tier1','Tier2','Tier3',]:
+			num_events_tier = int((event_data_no_prerandom_events['momentary_treatment_tier'] == tier_name).sum())
 			temp_dict['Summary'][tier_name]['num_events'] = num_events_tier
 
-		temp_dict['Summary']['All']['num_events'] = len(event_data)
+		temp_dict['Summary']['All']['num_events'] = len(event_data_no_prerandom_events)
 
 
 		# Now daily rates
-		for tier_name in ['Tier1','Tier2','Tier3','Standard','All']:
+		for tier_name in ['Tier1','Tier2','Tier3','All']:
 			if temp_dict['Summary'][tier_name]['valid_hours'] > 0:
 				temp_dict['Summary'][tier_name]['daily_SD_rate'] = round(24 *  temp_dict['Summary'][tier_name]['num_events'] / temp_dict['Summary'][tier_name]['valid_hours'],2)
 			else:
@@ -299,9 +319,6 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 	return output_dictionary
 
 	
-
-	# Close excel writer
-	excel_writer.close()
 
 def export_INDICT_data(results_dict,save_path):
 
@@ -321,7 +338,7 @@ def export_INDICT_data(results_dict,save_path):
 		temp_dict['daily_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=daily_start_col)
 
 		bucketed_start_col = 11
-		temp_dict['bucketed_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
+		temp_dict['bucketed_events_df_random_centered'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
 
 		# Add individual stats
 		worksheet = excel_writer.sheets[patient_id]
@@ -364,11 +381,6 @@ def export_INDICT_data(results_dict,save_path):
 		worksheet['T16'] = temp_dict['Summary']['All']['valid_hours']
 		worksheet['U16'] = temp_dict['Summary']['All']['daily_SD_rate']
 
-		worksheet['R17'] = 'Standard'
-		worksheet['S17'] = temp_dict['Summary']['Standard']['num_events']
-		worksheet['T17'] = temp_dict['Summary']['Standard']['valid_hours']
-		worksheet['U17'] = temp_dict['Summary']['Standard']['daily_SD_rate']
-
 		worksheet['R18'] = 'Tier1'
 		worksheet['S18'] = temp_dict['Summary']['Tier1']['num_events']
 		worksheet['T18'] = temp_dict['Summary']['Tier1']['valid_hours']
@@ -393,16 +405,3 @@ def export_INDICT_data(results_dict,save_path):
 	excel_writer.close()
 
  
-
-
-	# # Get json
-	# json_str = json.dumps(output_dictionary, sort_keys=True, indent=2)
-
-	# # Regex to put lists on one line
-	# json_str = re.sub(r'\[(\s+.*?)\]', lambda m: '[' + re.sub(r'\s+', ' ', m.group(1)).strip() +']', json_str, flags=re.DOTALL)
-
-	# # Save it
-	# with open(save_path + 'output.json', 'w') as f:
-	#   f.write(json_str)
-
-# INDICT_XLSX_Analysis('../input_data/LabChartScoring.xlsx','../input_data/Master.xlsx',save_path = '../results2/')

@@ -2,30 +2,47 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_tier_comparison(output_dict, save_path=None):
+def plot_tier_comparison(results_dict, save_path=None):
 	"""
-	Creates a scatter plot comparing SD rates across different tiers and treatment groups.
+	Creates a scatter plot comparing SD rates across different groups and tiers.
 	Shows median values with interquartile ranges and individual patient data points.
 
 	Args:
-		output_dict: The output dictionary from INDICT_XLSX_Analysis
+		results_dict: The output dictionary from INDICT_XLSX_Analysis
 		save_path: Optional path to save the figure. If None, will display the plot.
 	"""
 
 	# Define the categories to compare
-	categories = ['Standard', 'Tier1', 'Tier2', 'Tier3']
-	category_labels = ['Standard', 'Tier 1', 'Tier 2', 'Tier 3']
+	categories = ['Standard_All', 'Treatment_All', 'Treatment_Tier1', 'Treatment_Tier2', 'Treatment_Tier3']
+	category_labels = ['Control\n(Post-Rand)', 'Treatment\n(All Post-Rand)', 'Treatment\nTier 1', 'Treatment\nTier 2', 'Treatment\nTier 3']
 
 	# Collect data for each category
 	category_data = {cat: [] for cat in categories}
 
-	for patient_id, patient_data in output_dict.items():
-		for cat in categories:
-			if cat in patient_data['Summary']:
-				sd_rate = patient_data['Summary'][cat]['daily_SD_rate']
-				# Only include non-NaN values
-				if not np.isnan(sd_rate):
-					category_data[cat].append(sd_rate)
+	# Extract daily rates from results_dict
+	for patient_id, patient_data in results_dict.items():
+		treatment_group = patient_data['patient_treatment_group']
+
+		if treatment_group == 'Standard':
+			# Standard group - get "All" daily rate (post-randomization)
+			if 'All' in patient_data['Summary'] and 'daily_SD_rate' in patient_data['Summary']['All']:
+				rate = patient_data['Summary']['All']['daily_SD_rate']
+				if pd.notna(rate):
+					category_data['Standard_All'].append(rate)
+
+		elif treatment_group == 'Treatment':
+			# Treatment group - get "All" daily rate (post-randomization)
+			if 'All' in patient_data['Summary'] and 'daily_SD_rate' in patient_data['Summary']['All']:
+				rate = patient_data['Summary']['All']['daily_SD_rate']
+				if pd.notna(rate):
+					category_data['Treatment_All'].append(rate)
+
+			# Treatment group - get Tier 1, 2, 3 rates
+			for tier_name in ['Tier1', 'Tier2', 'Tier3']:
+				if tier_name in patient_data['Summary'] and 'daily_SD_rate' in patient_data['Summary'][tier_name]:
+					rate = patient_data['Summary'][tier_name]['daily_SD_rate']
+					if pd.notna(rate):
+						category_data[f'Treatment_{tier_name}'].append(rate)
 
 	# Calculate statistics for each category
 	medians = []
@@ -51,13 +68,13 @@ def plot_tier_comparison(output_dict, save_path=None):
 	q75s = np.array(q75s)
 
 	# Create figure
-	fig, ax = plt.subplots(figsize=(10, 8))
+	fig, ax = plt.subplots(figsize=(12, 8))
 
 	# Define x-positions for each category
 	x_positions = np.arange(len(categories))
 
 	# Define colors for each category
-	colors = ['gray', '#FFD700', '#FFA500', '#FF6B6B']  # Gray, Gold, Orange, Red
+	colors = ['darkred', 'darkgreen', '#FFD700', '#FFA500', '#FF6B6B']  # Red for control, Green for treatment all, Gold/Orange/Red for tiers
 
 	# Plot individual patient points with jitter
 	for i, cat in enumerate(categories):
@@ -95,10 +112,10 @@ def plot_tier_comparison(output_dict, save_path=None):
 
 	# Styling
 	ax.set_xticks(x_positions)
-	ax.set_xticklabels(category_labels, fontsize=12, fontweight='bold')
+	ax.set_xticklabels(category_labels, fontsize=11, fontweight='bold')
 	ax.set_ylabel('Daily SD Rate (events/24h)', fontsize=14, fontweight='bold')
-	ax.set_xlabel('Treatment Category', fontsize=14, fontweight='bold')
-	ax.set_title('Comparison of Daily SD Rates Across Treatment Tiers',
+	ax.set_xlabel('Group / Treatment Tier', fontsize=14, fontweight='bold')
+	ax.set_title('Comparison of Daily SD Rates: Control vs Treatment (All & By Tier)',
 	            fontsize=16, fontweight='bold', pad=20)
 
 	# Grid

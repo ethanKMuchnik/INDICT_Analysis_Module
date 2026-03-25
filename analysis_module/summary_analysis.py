@@ -1,7 +1,7 @@
 import pandas as pd
 from openpyxl.styles import Font, PatternFill
 
-def conglomerate_patient_data(output_dict, metric_column='daily_SD_rate'):
+def conglomerate_patient_data(output_dict, reference_data_key,metric_column ='daily_SD_rate'):
 	"""
 	Conglomerates bucketed data across patients into treatment and standard group tables.
 
@@ -20,7 +20,7 @@ def conglomerate_patient_data(output_dict, metric_column='daily_SD_rate'):
 
 	# Separate patients by treatment group
 	for patient_id, patient_data in output_dict.items():
-		bucketed_df = patient_data['bucketed_events_df'][['time_hours', metric_column]].copy()
+		bucketed_df = patient_data[reference_data_key][['time_hours', metric_column]].copy()
 		bucketed_df = bucketed_df.rename(columns={metric_column: patient_id})
 
 		if patient_data['patient_treatment_group'] == 'Treatment':
@@ -53,7 +53,7 @@ def conglomerate_patient_data(output_dict, metric_column='daily_SD_rate'):
 	return treatment_table, standard_table
 
 
-def export_conglomerated_data(output_dict, save_path, metric_columns=['daily_SD_rate', 'tier_character', 'num_events', 'valid_recording_hours']):
+def export_conglomerated_data(output_dict,reference_data_key, save_path ,metric_columns=['daily_SD_rate', 'tier_character', 'num_events', 'valid_recording_hours']):
 	"""
 	Exports conglomerated patient data to an Excel file with separate sheets for each metric.
 
@@ -68,7 +68,7 @@ def export_conglomerated_data(output_dict, save_path, metric_columns=['daily_SD_
 
 	# Process each metric
 	for metric in metric_columns:
-		treatment_table, standard_table = conglomerate_patient_data(output_dict, metric_column=metric)
+		treatment_table, standard_table = conglomerate_patient_data(output_dict, reference_data_key,metric_column=metric)
 
 		# Write treatment table
 		if not treatment_table.empty:
@@ -98,3 +98,79 @@ def export_conglomerated_data(output_dict, save_path, metric_columns=['daily_SD_
 	excel_writer.close()
 
 	print(f"Conglomerated data saved to: {save_path}")
+
+
+def export_tier_summary_data(output_dict, save_path):
+	"""
+	Exports tier-conglomerated data across all patients to an Excel file.
+	Creates a sheet with columns for each patient and rows for tier metrics.
+
+	Args:
+		output_dict: The output dictionary from INDICT_XLSX_Analysis
+		save_path: Path where to save the Excel file (should end with .xlsx)
+	"""
+
+	# Define the rows we want to extract
+	row_definitions = [
+		('Total Events', 'All', 'num_events'),
+		('Standard Events', 'Standard', 'num_events'),
+		('Tier 1 Events', 'Tier1', 'num_events'),
+		('Tier 2 Events', 'Tier2', 'num_events'),
+		('Tier 3 Events', 'Tier3', 'num_events'),
+		('Standard Valid Time (hrs)', 'Standard', 'valid_hours'),
+		('Tier 1 Valid Time (hrs)', 'Tier1', 'valid_hours'),
+		('Tier 2 Valid Time (hrs)', 'Tier2', 'valid_hours'),
+		('Tier 3 Valid Time (hrs)', 'Tier3', 'valid_hours'),
+		('Standard Daily Rate', 'Standard', 'daily_SD_rate'),
+		('Tier 1 Daily Rate', 'Tier1', 'daily_SD_rate'),
+		('Tier 2 Daily Rate', 'Tier2', 'daily_SD_rate'),
+		('Tier 3 Daily Rate', 'Tier3', 'daily_SD_rate'),
+	]
+
+	# Get all patient IDs
+	patient_ids = list(output_dict.keys())
+
+	# Create data dictionary with row labels as index
+	data = {'Metric': [row_def[0] for row_def in row_definitions]}
+
+	# Extract data for each patient
+	for patient_id in patient_ids:
+		patient_data = output_dict[patient_id]
+		patient_column = []
+
+		for row_label, tier_key, metric_key in row_definitions:
+			# Access the data from Summary dict
+			if tier_key in patient_data['Summary']:
+				value = patient_data['Summary'][tier_key].get(metric_key, None)
+				patient_column.append(value)
+			else:
+				patient_column.append(None)
+
+		data[patient_id] = patient_column
+
+	# Create DataFrame
+	df = pd.DataFrame(data)
+
+	# Create Excel writer
+	excel_writer = pd.ExcelWriter(save_path, engine='openpyxl')
+
+	# Write to sheet
+	df.to_excel(excel_writer, sheet_name='Tier Summary', index=False)
+
+	# Format the sheet
+	worksheet = excel_writer.sheets['Tier Summary']
+
+	# Bold header row
+	for cell in worksheet[1]:
+		cell.font = Font(bold=True)
+		cell.fill = PatternFill(start_color='87CEEB', end_color='87CEEB', fill_type='solid')
+
+	# Bold first column (Metric names)
+	for row in worksheet.iter_rows(min_row=2, max_row=len(row_definitions)+1, min_col=1, max_col=1):
+		for cell in row:
+			cell.font = Font(bold=True)
+
+	# Close the Excel writer
+	excel_writer.close()
+
+	print(f"Tier summary data saved to: {save_path}")
