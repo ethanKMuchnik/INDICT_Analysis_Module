@@ -7,6 +7,65 @@ from openpyxl.styles import Font, PatternFill
 # -------
 
 
+
+# Functions for working with lists 
+def check_time_inclusion_in_list(time_hours,range_list):
+	#Range list e.g [(10,20),(34.2,50),(74,80)], time_hours = 6.5 --> false
+
+	for start,end in range_list:
+		if (start <= time_hours) and (end > time_hours):
+			return True 
+
+	return False
+
+def intersect_ranges(ranges1, ranges2):
+    # Sort both lists by start value
+    r1 = sorted(ranges1)
+    r2 = sorted(ranges2)
+    
+    result = []
+    i, j = 0, 0
+    
+    while i < len(r1) and j < len(r2):
+        # Find overlap between current pair
+        start = max(r1[i][0], r2[j][0])
+        end = min(r1[i][1], r2[j][1])
+        
+        if start < end:  # Valid intersection
+            result.append((start, end))
+        
+        # Advance whichever range ends first
+        if r1[i][1] < r2[j][1]:
+            i += 1
+        else:
+            j += 1
+    
+    return result
+
+def series_overlap(series1,series2):
+	# Format both [(20,40)] or [(20,30),(60,90)] etc
+
+	total_overlap = 0
+	for ind_range1 in series1:
+		for ind_range2 in series2:
+			overlap_start = max(ind_range1[0],ind_range2[0])
+			overlap_end = min(ind_range1[1],ind_range2[1])
+			overlap = max(0, overlap_end - overlap_start)
+			total_overlap += overlap
+
+	return total_overlap
+
+def series_length(range1):
+	total = 0 
+	for start,end in range1:
+		total += max(0,end - start)
+
+	return total
+# ----------
+
+
+
+
 # Simple cosmetics 
 def adjust_column_widths(worksheet):
   """Auto-adjust column widths based on content"""
@@ -30,11 +89,10 @@ def format_master_file(input_master_file):
 	master_sheet =  pd.read_excel(master_file, sheet_name=0, header=None)
 	master_sheet = master_sheet.iloc[1:].reset_index(drop=True) #Shift one down
 	master_sheet.columns = ['patient_id','treatment_group','injury_datetime']
+	master_sheet['treatment_group'] = master_sheet['treatment_group'].replace('SD-Guided', 'Treatment')
 	master_sheet = master_sheet.set_index('patient_id')
 
 	return master_sheet
-
-
 
 
 # Get A and D col of event data with set rules 
@@ -71,16 +129,9 @@ def get_randomization_time(input_sheet,patient_injury_datetime):
 	randomization_datetime = input_sheet.iloc[0,11]
 	return datetime_relative_to_injury(randomization_datetime,patient_injury_datetime),randomization_datetime
 
-def check_time_inclusion_in_list(time_hours,range_list):
-	#Range list e.g [(10,20),(34.2,50),(74,80)], time_hours = 6.5 --> false
 
-	for start,end in range_list:
-		if (start <= time_hours) and (end > time_hours):
-			return True 
 
-	return False
-
-def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,time_reference_key = 'time_post_injury',min_time = 0,fixed_offset = 0):
+def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,min_time = 0,fixed_offset = 0):
 	time_hours = np.arange(min_time,max_time,bucket_size)
 	valid_hours = [] 
 	event_counts = []
@@ -100,20 +151,26 @@ def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,time_refer
 		valid_hours.append(round(valid_hours_ind,2))
 
 		# Compute event count
-		boolean_events = ((event_data[time_reference_key] >= t) & (event_data[time_reference_key] < t + bucket_size))
+		boolean_events = ((event_data['time_post_injury'] >= t) & (event_data['time_post_injury'] < t + bucket_size))
 		num_events_ind = boolean_events.sum()
 		event_counts.append(num_events_ind)
 
 		# Compute tier charachter - note def and if  
-		tier1_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier1'])
-		tier2_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier2'])
-		tier3_hours = series_overlap(segment_time_series,temp_dict['Epochs']['Tier3'])
+		#Get valid time intersect segment 
+		reduced_segment_series = intersect_ranges(segment_time_series,temp_dict['Epochs']['Valid'])
+		reduced_bucket_length = series_length(reduced_segment_series)
+		tier1_hours = series_overlap(reduced_segment_series,temp_dict['Epochs']['Tier1'])
+		tier2_hours = series_overlap(reduced_segment_series,temp_dict['Epochs']['Tier2'])
+		tier3_hours = series_overlap(reduced_segment_series,temp_dict['Epochs']['Tier3'])
 
-		tier_character_ind = (tier1_hours + 2*tier2_hours + 3*tier3_hours)/bucket_size
+
 
 		# note change
-		if valid_hours_ind == 0:
+		if reduced_bucket_length == 0:
 			tier_character_ind = np.nan
+		else:
+			tier_character_ind = (tier1_hours + 2*tier2_hours + 3*tier3_hours)/reduced_bucket_length
+
 			
 		tier_characters.append(round(tier_character_ind,2))
 
@@ -133,32 +190,11 @@ def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,time_refer
 
 	return bucketed_events
 
-def series_overlap(series1,series2):
-	# Format both [(20,40)] or [(20,30),(60,90)] etc
 
-	total_overlap = 0
-	for ind_range1 in series1:
-		for ind_range2 in series2:
-			overlap_start = max(ind_range1[0],ind_range2[0])
-			overlap_end = min(ind_range1[1],ind_range2[1])
-			overlap = max(0, overlap_end - overlap_start)
-			total_overlap += overlap
 
-	return total_overlap
+def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size_summary = 6,summary_hours_range = [-24,72] , daily_hours_max = 240):
 
-def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, max_time = 240):
-
-	"""
-	Inputs: Scoring and master file with presumed format 
-	Outputs:
-		saves: 	eventCSV per patient 
-				dailyCSV per patient
-				bucketedCSV per patient 
-				globalBucketdCSV
-				 output_dictionary
-					-patientId
-						...
-	"""
+	
 
 	# load the scoring data (all of it from excel) into dict format
 	xlsx_file = pd.ExcelFile(input_scoring_file)
@@ -179,8 +215,7 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 		# Reference master list 
 		patient_injury_datetime = master_sheet.loc[patient_id, 'injury_datetime']
 		patient_treatment_group = master_sheet.loc[patient_id, 'treatment_group']
-		if patient_treatment_group == 'SD-Guided':
-			patient_treatment_group = 'Treatment'
+
 		temp_dict['patient_injury_datetime'] = patient_injury_datetime		
 		# Get event data 
 		event_data = extract_events_from_single_sheet(relevant_sheet,patient_injury_datetime)
@@ -269,15 +304,15 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 				break
 		
 		# Compute both daily and bucketed events 
-		daily_events = compute_bucketed_events(event_data,24,max_time,temp_dict)
+		daily_events = compute_bucketed_events(event_data,24,daily_hours_max,temp_dict)
 		temp_dict['daily_events_df'] = daily_events
 
 
-		bucketed_events = compute_bucketed_events(event_data,bucket_size,max_time,temp_dict)
-		temp_dict['bucketed_events_df'] = bucketed_events
+		# bucketed_events = compute_bucketed_events(event_data,bucket_size,max_time,temp_dict)
+		# temp_dict['bucketed_events_df'] = bucketed_events
 		
 		# randomization centered time
-		bucketed_events_post_random = compute_bucketed_events(event_data,6,72,temp_dict,min_time = -24,fixed_offset = temp_dict['randomization_hours'])
+		bucketed_events_post_random = compute_bucketed_events(event_data,bucket_size_summary,summary_hours_range[1],temp_dict,min_time = summary_hours_range[0],fixed_offset = temp_dict['randomization_hours'])
 		temp_dict['bucketed_events_df_random_centered'] = bucketed_events_post_random
 
 
@@ -288,7 +323,7 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size = 6, m
 
 		temp_dict['Summary'] = dict()
 
-		# Get valid time intesections
+		# Get valid time intesections - Tiers by definition sare after raandomization so it works 
 		for tier_name in ['Tier1','Tier2','Tier3']:
 			valid_tier_time = round(series_overlap(temp_dict['Epochs'][tier_name],temp_dict['Epochs']['Valid']),2)
 			temp_dict['Summary'][tier_name] = {'valid_hours':valid_tier_time}
@@ -334,11 +369,11 @@ def export_INDICT_data(results_dict,save_path):
 		# Save the events to a sheet
 		temp_dict['event_data_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0, startcol=0)
 
-		daily_start_col = 5
+		daily_start_col = 6
 		temp_dict['daily_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=daily_start_col)
 
-		bucketed_start_col = 11
-		temp_dict['bucketed_events_df_random_centered'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
+		# bucketed_start_col = 11
+		# temp_dict['bucketed_events_df'].to_excel(excel_writer, sheet_name=patient_id, index=False, startrow=0,startcol=bucketed_start_col)
 
 		# Add individual stats
 		worksheet = excel_writer.sheets[patient_id]
@@ -346,8 +381,10 @@ def export_INDICT_data(results_dict,save_path):
 		worksheet['R1'] = 'Treatment Group'
 		worksheet['S1'] = temp_dict['patient_treatment_group']
 		worksheet['S1'].font = Font(bold=True)
-		worksheet['S1'].fill = PatternFill(start_color='d4675f', end_color='d4675f', fill_type='solid')
-
+		if temp_dict['patient_treatment_group'] == 'Standard':
+			worksheet['S1'].fill = PatternFill(start_color='d4675f', end_color='d4675f', fill_type='solid')
+		if temp_dict['patient_treatment_group'] == 'Treatment':
+			worksheet['S1'].fill = PatternFill(start_color='008000', end_color='008000', fill_type='solid')
 
 		worksheet['R2'] = 'Time of Injury'
 		worksheet['S2'] = temp_dict['patient_injury_datetime']

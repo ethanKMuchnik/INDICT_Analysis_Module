@@ -113,15 +113,14 @@ def export_tier_summary_data(output_dict, save_path):
 	# Define the rows we want to extract
 	row_definitions = [
 		('Total Events', 'All', 'num_events'),
-		('Standard Events', 'Standard', 'num_events'),
 		('Tier 1 Events', 'Tier1', 'num_events'),
 		('Tier 2 Events', 'Tier2', 'num_events'),
 		('Tier 3 Events', 'Tier3', 'num_events'),
-		('Standard Valid Time (hrs)', 'Standard', 'valid_hours'),
+		('Total Valid Time (hrs)', 'All', 'valid_hours'),
 		('Tier 1 Valid Time (hrs)', 'Tier1', 'valid_hours'),
 		('Tier 2 Valid Time (hrs)', 'Tier2', 'valid_hours'),
 		('Tier 3 Valid Time (hrs)', 'Tier3', 'valid_hours'),
-		('Standard Daily Rate', 'Standard', 'daily_SD_rate'),
+		('Total Daily Rate', 'All', 'daily_SD_rate'),
 		('Tier 1 Daily Rate', 'Tier1', 'daily_SD_rate'),
 		('Tier 2 Daily Rate', 'Tier2', 'daily_SD_rate'),
 		('Tier 3 Daily Rate', 'Tier3', 'daily_SD_rate'),
