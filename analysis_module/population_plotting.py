@@ -2,7 +2,88 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_population(summary_xlsx_path, save_path=None):
+def single_rate_plot(summary_xlsx_path,x_label = 'Time',save_path=None):
+
+	# Load the Excel file
+	xlsx_file = pd.ExcelFile(summary_xlsx_path)
+
+
+	valid_hours_treatment = pd.read_excel(xlsx_file, sheet_name='valid_recording_hours_treatment')
+	valid_hours_treatment['Total'] = valid_hours_treatment.drop(columns=['time_hours']).sum(axis=1)
+
+
+	valid_hours_standard = pd.read_excel(xlsx_file, sheet_name='valid_recording_hours_standard')
+	valid_hours_standard['Total'] = valid_hours_standard.drop(columns=['time_hours']).sum(axis=1)
+
+
+	num_events_treatment = pd.read_excel(xlsx_file, sheet_name='num_events_treatment')
+	num_events_treatment['Total'] = num_events_treatment.drop(columns=['time_hours']).sum(axis=1)
+
+
+	num_events_standard = pd.read_excel(xlsx_file, sheet_name='num_events_standard')
+	num_events_standard['Total'] = num_events_standard.drop(columns=['time_hours']).sum(axis=1)
+
+
+	single_rate_standard = 24 * num_events_standard['Total'].to_numpy() / valid_hours_standard['Total'].to_numpy()
+	single_rate_treatment = 24 * num_events_treatment['Total'].to_numpy() / valid_hours_treatment['Total'].to_numpy()
+	time_series = num_events_treatment['time_hours'].to_numpy()
+
+	# Calculate bucket size and bar positioning
+	bucket_size = time_series[1] - time_series[0] if len(time_series) > 1 else 6
+	width = bucket_size * 0.35
+	offset = width / 2
+	midpoint_shift = bucket_size / 2
+
+	# Create figure with 2 subplots
+	fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+	# Subplot 1: SD Rates as bar chart
+	ax1.bar((time_series + midpoint_shift) - offset, single_rate_treatment, width=width,
+	        color='green', edgecolor='darkgreen', linewidth=1.5,
+	        label='Treatment', alpha=0.7)
+	ax1.bar((time_series + midpoint_shift) + offset, single_rate_standard, width=width,
+	        color='red', edgecolor='darkred', linewidth=1.5,
+	        label='Standard', alpha=0.7)
+
+	ax1.set_ylabel('SD Rate (events/24h)', fontsize=12, fontweight='bold')
+	ax1.set_xlabel(x_label, fontsize=12, fontweight='bold')
+	ax1.set_title('SD Rates: Treatment vs Standard', fontsize=14, fontweight='bold')
+	ax1.legend(fontsize=11, frameon=True)
+	ax1.grid(True, axis='y', alpha=0.3, linestyle='--')
+	ax1.spines['top'].set_visible(False)
+	ax1.spines['right'].set_visible(False)
+	ax1.set_xticks(time_series)
+
+	# Subplot 2: Valid Recording Time as bar chart
+	valid_time_treatment = valid_hours_treatment['Total'].to_numpy()
+	valid_time_standard = valid_hours_standard['Total'].to_numpy()
+
+	ax2.bar((time_series + midpoint_shift) - offset, valid_time_treatment, width=width,
+	        color='green', edgecolor='darkgreen', linewidth=1.5,
+	        label='Treatment', alpha=0.7)
+	ax2.bar((time_series + midpoint_shift) + offset, valid_time_standard, width=width,
+	        color='red', edgecolor='darkred', linewidth=1.5,
+	        label='Standard', alpha=0.7)
+
+	ax2.set_ylabel('Valid Recording Time (hours)', fontsize=12, fontweight='bold')
+	ax2.set_xlabel(x_label, fontsize=12, fontweight='bold')
+	ax2.set_title('Valid Recording Time: Treatment vs Standard', fontsize=14, fontweight='bold')
+	ax2.legend(fontsize=11, frameon=True)
+	ax2.grid(True, axis='y', alpha=0.3, linestyle='--')
+	ax2.spines['top'].set_visible(False)
+	ax2.spines['right'].set_visible(False)
+	ax2.set_xticks(time_series)
+
+	plt.tight_layout()
+
+	if save_path:
+		plt.savefig(save_path, dpi=300, bbox_inches='tight')
+		print(f"Plot saved to: {save_path}")
+	else:
+		plt.show()
+
+
+def plot_population(summary_xlsx_path,x_label = 'Time', save_path=None):
 	"""
 	Creates population-level plots from the summary xlsx file.
 
@@ -73,6 +154,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 
 	width = bucket_size * 0.35
 	offset = width / 2
+	midpoint_shift = bucket_size / 2
 
 	# Prepare data for box plots
 	treatment_data_by_time = []
@@ -96,7 +178,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 	# Create box plots
 	box_width = width * 1.2
 	bp_treatment = ax1.boxplot([treatment_data_by_time[i] for i in range(len(time_series))],
-	                            positions=time_series - offset,
+	                            positions=(time_series + midpoint_shift) - offset,
 	                            widths=box_width,
 	                            patch_artist=True,
 	                            showfliers=False,
@@ -106,7 +188,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 	                            capprops=dict(color='darkgreen', linewidth=1.5))
 
 	bp_standard = ax1.boxplot([standard_data_by_time[i] for i in range(len(time_series))],
-	                           positions=time_series + offset,
+	                           positions=(time_series + midpoint_shift) + offset,
 	                           widths=box_width,
 	                           patch_artist=True,
 	                           showfliers=False,
@@ -120,7 +202,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 		# Treatment points
 		if len(treatment_data_by_time[idx]) > 0:
 			jitter = np.random.normal(0, width/10, size=len(treatment_data_by_time[idx]))
-			x_positions = np.full(len(treatment_data_by_time[idx]), t - offset) + jitter
+			x_positions = np.full(len(treatment_data_by_time[idx]), (t + midpoint_shift) - offset) + jitter
 			ax1.scatter(x_positions, treatment_data_by_time[idx],
 			           color='darkgreen', s=60, alpha=0.7,
 			           edgecolors='black', linewidth=0.8, zorder=3)
@@ -128,7 +210,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 		# Standard points
 		if len(standard_data_by_time[idx]) > 0:
 			jitter = np.random.normal(0, width/10, size=len(standard_data_by_time[idx]))
-			x_positions = np.full(len(standard_data_by_time[idx]), t + offset) + jitter
+			x_positions = np.full(len(standard_data_by_time[idx]), (t + midpoint_shift) + offset) + jitter
 			ax1.scatter(x_positions, standard_data_by_time[idx],
 			           color='darkred', s=60, alpha=0.7,
 			           edgecolors='black', linewidth=0.8, zorder=3)
@@ -140,7 +222,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 	ax1.legend(handles=legend_elements, frameon=True, fontsize=16, loc='upper left')
 
 	ax1.set_ylabel('Daily SD Rate (events/24h)', fontsize=14, fontweight='bold')
-	ax1.set_xlabel('Time Post-Randomization (hours)', fontsize=14, fontweight='bold')
+	ax1.set_xlabel(x_label, fontsize=14, fontweight='bold')
 	ax1.grid(True, axis='y', alpha=0.3, linestyle='--')
 	ax1.spines['top'].set_visible(False)
 	ax1.spines['right'].set_visible(False)
@@ -161,7 +243,7 @@ def plot_population(summary_xlsx_path, save_path=None):
 	trans = blended_transform_factory(ax1.transData, ax1.transAxes)
 
 	# Use first bucket position for label alignment
-	label_x_pos = time_series[0] if len(time_series) > 0 else 0
+	label_x_pos = (time_series[0] + midpoint_shift) if len(time_series) > 0 else 0
 
 	# Add row label for Treatment Tier (above the data, centered with first bucket)
 	ax1.text(label_x_pos, -0.18, 'Treatment Tier (Mean)', ha='center', va='bottom',
@@ -170,12 +252,12 @@ def plot_population(summary_xlsx_path, save_path=None):
 	for idx, t in enumerate(time_series):
 		# Treatment value (green) - using blended transform for perfect alignment
 		treatment_tier_val = treatment_tier[idx] if not np.isnan(treatment_tier[idx]) else 0
-		ax1.text(t, -0.20, f'{treatment_tier_val:.1f}', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.20, f'{treatment_tier_val:.1f}', ha='center', va='center', fontsize=10,
 		        color='darkgreen', fontweight='bold', transform=trans, clip_on=False)
 
 		# Standard value (red) - closer to treatment
 		standard_tier_val = standard_tier[idx] if not np.isnan(standard_tier[idx]) else 0
-		ax1.text(t, -0.23, f'{standard_tier_val:.1f}', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.23, f'{standard_tier_val:.1f}', ha='center', va='center', fontsize=10,
 		        color='darkred', fontweight='bold', transform=trans, clip_on=False)
 
 	# Add row label for ECoG Time (above the data, centered with first bucket)
@@ -186,13 +268,13 @@ def plot_population(summary_xlsx_path, save_path=None):
 		# Treatment value (green) - convert to percent
 		treatment_valid_val = treatment_valid[idx] if not np.isnan(treatment_valid[idx]) else 0
 		treatment_valid_pct = (treatment_valid_val / bucket_size) * 100
-		ax1.text(t, -0.32, f'{treatment_valid_pct:.0f}%', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.32, f'{treatment_valid_pct:.0f}%', ha='center', va='center', fontsize=10,
 		        color='darkgreen', fontweight='bold', transform=trans, clip_on=False)
 
 		# Standard value (red) - closer to treatment
 		standard_valid_val = standard_valid[idx] if not np.isnan(standard_valid[idx]) else 0
 		standard_valid_pct = (standard_valid_val / bucket_size) * 100
-		ax1.text(t, -0.35, f'{standard_valid_pct:.0f}%', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.35, f'{standard_valid_pct:.0f}%', ha='center', va='center', fontsize=10,
 		        color='darkred', fontweight='bold', transform=trans, clip_on=False)
 
 	# Add row label for Number of Valid Rates (above the data, centered with first bucket)
@@ -215,11 +297,11 @@ def plot_population(summary_xlsx_path, save_path=None):
 
 	for idx, t in enumerate(time_series):
 		# Treatment N (green)
-		ax1.text(t, -0.44, f'{treatment_n_valid[idx]}', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.44, f'{treatment_n_valid[idx]}', ha='center', va='center', fontsize=10,
 		        color='darkgreen', fontweight='bold', transform=trans, clip_on=False)
 
 		# Standard N (red)
-		ax1.text(t, -0.47, f'{standard_n_valid[idx]}', ha='center', va='center', fontsize=10,
+		ax1.text(t + midpoint_shift, -0.47, f'{standard_n_valid[idx]}', ha='center', va='center', fontsize=10,
 		        color='darkred', fontweight='bold', transform=trans, clip_on=False)
 
 	# Save or show

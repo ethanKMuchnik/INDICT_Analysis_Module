@@ -6,5 +6,9 @@ from .refined_loading import (
 
 )
 
+from .interactive_patient_plotting import (
+	create_interactive_patient_viewer
+)
+
 __version__ = "0.1.0"
 

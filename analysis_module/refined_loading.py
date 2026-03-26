@@ -192,7 +192,8 @@ def compute_bucketed_events(event_data,bucket_size,max_time,temp_dict,min_time =
 
 
 
-def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size_summary = 6,summary_hours_range = [-24,72] , daily_hours_max = 240):
+def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size_summary_post_rand = 6, bucket_size_summary_post_injury = 12,summary_hours_range_post_random = [-24,72] , 
+						summary_hours_range_post_injury = [0,192],daily_hours_max = 240):
 
 	
 
@@ -312,8 +313,11 @@ def INDICT_XLSX_Analysis(input_scoring_file,input_master_file,bucket_size_summar
 		# temp_dict['bucketed_events_df'] = bucketed_events
 		
 		# randomization centered time
-		bucketed_events_post_random = compute_bucketed_events(event_data,bucket_size_summary,summary_hours_range[1],temp_dict,min_time = summary_hours_range[0],fixed_offset = temp_dict['randomization_hours'])
+		bucketed_events_post_random = compute_bucketed_events(event_data,bucket_size_summary_post_rand,summary_hours_range_post_random[1],temp_dict,min_time = summary_hours_range_post_random[0],fixed_offset = temp_dict['randomization_hours'])
 		temp_dict['bucketed_events_df_random_centered'] = bucketed_events_post_random
+		
+		bucketed_events_post_injury = compute_bucketed_events(event_data,bucket_size_summary_post_injury,summary_hours_range_post_injury[1],temp_dict,min_time = summary_hours_range_post_injury[0],fixed_offset = 0)
+		temp_dict['bucketed_events_df_injury_centered'] = bucketed_events_post_injury
 
 
 		
